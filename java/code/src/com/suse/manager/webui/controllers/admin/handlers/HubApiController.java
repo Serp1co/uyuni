@@ -103,7 +103,7 @@ public class HubApiController {
 
     /**
      * initialize all the API Routes for the ISSv3 support
-     * */
+     */
     public void initRoutes() {
         // Hub management
         get("/manager/api/admin/hub", withProductAdmin(this::pass));
