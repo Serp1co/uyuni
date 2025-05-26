@@ -17,20 +17,30 @@ type ChannelWithHierarchy = FlatChannel &
 
 type ChannelTableProps = {
   channels: FlatChannel[];
+  channelOrgMapping: Record<number, number>;
   onChannelSelect: (channelId: number, checked: boolean) => void;
-  onOrgSelect?: (channelId: number, orgId?: number) => void;
+  onOrgSelect?: (channelId: number, orgId?: number) => Record<number, number>;
   loading?: boolean;
   availableOrgs: Org[];
 };
 
 const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
   channels,
+  channelOrgMapping,
   onChannelSelect,
   availableOrgs,
   onOrgSelect,
 }) => {
   const [selectedArchs, setSelectedArchs] = useState<string[]>([]);
   const [searchCriteria, setSearchCriteria] = useState<string>("");
+
+  const formModel = useMemo(() => {
+    const model: Record<string, number> = {};
+    Object.entries(channelOrgMapping).forEach(([channelId, orgId]) => {
+      model[`org-select-${channelId}`] = orgId;
+    });
+    return model;
+  }, [channelOrgMapping]);
 
   const hierarchicalData = useMemo(() => {
     // Build lookup map by channel label
@@ -92,7 +102,6 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
       const channelId = row.channelId;
       // Directly use the pre-calculated checkbox state
       const isChecked = row.isChecked;
-
       return (
         <div className="d-flex align-items-center">
           <input type="checkbox" checked={isChecked} onChange={() => onChannelSelect(channelId, !isChecked)} />
@@ -125,22 +134,20 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
         return <span>SUSE</span>; // Vendor channels can't sync orgs
       }
       return (
-        <Form>
-          <Select
-            name={`org-select-${row.channelId}`}
-            placeholder={t("Select Organization")}
-            isClearable={true}
-            options={orgMapping}
-            onChange={(_, orgId) => {
-              if (onOrgSelect) {
-                onOrgSelect(row.channelId, orgId);
-              }
-            }}
-          />
-        </Form>
+        <Select
+          name={`org-select-${row.channelId}`}
+          placeholder={t("Select Organization")}
+          isClearable={true}
+          options={orgMapping}
+          onChange={(_, orgId) => {
+            if (onOrgSelect) {
+              onOrgSelect(row.channelId, orgId);
+            }
+          }}
+        />
       );
     },
-    [availableOrgs, onOrgSelect]
+    [availableOrgs, onOrgSelect, orgMapping]
   );
 
   const getDistinctArchsFromData = useCallback((channels: FlatChannel[]) => {
@@ -176,21 +183,23 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
 
   return (
     <div className="channel-hierarchy-container">
-      <HierarchicalTable
-        data={filteredData}
-        identifier={identifier}
-        expandColumnKey="channelLabel"
-        initiallyExpanded={true}
-        cssClassFunction={rowClass}
-        searchField={searchField}
-        additionalFilters={[archFilter]}
-      >
-        <Column columnKey="synced" header={t("Sync")} cell={renderSyncCell} width="60px" />
-        <Column columnKey="channelLabel" header={t("Channel Label")} cell={renderChannelLabelCell} />
-        <Column columnKey="channelArch" header={t("Architecture")} cell={renderArchCell} />
-        <Column columnKey="channelOrg" header={t("Hub Org")} cell={renderHubOrgCell} />
-        <Column columnKey="channelOrg" header={t("Sync Org")} cell={renderSyncOrgCell} />
-      </HierarchicalTable>
+      <Form model={formModel}>
+        <HierarchicalTable
+          data={filteredData}
+          identifier={identifier}
+          expandColumnKey="channelLabel"
+          initiallyExpanded={true}
+          cssClassFunction={rowClass}
+          searchField={searchField}
+          additionalFilters={[archFilter]}
+        >
+          <Column columnKey="synced" header={t("Sync")} cell={renderSyncCell} width="60px" />
+          <Column columnKey="channelLabel" header={t("Channel Label")} cell={renderChannelLabelCell} />
+          <Column columnKey="channelArch" header={t("Architecture")} cell={renderArchCell} />
+          <Column columnKey="channelOrg" header={t("Hub Org")} cell={renderHubOrgCell} />
+          <Column columnKey="channelOrg" header={t("Sync Org")} cell={renderSyncOrgCell} />
+        </HierarchicalTable>
+      </Form>
     </div>
   );
 };

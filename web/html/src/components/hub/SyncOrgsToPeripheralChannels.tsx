@@ -150,7 +150,7 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
     }
   };
 
-  handleOrgSelect = (channelId: number, orgId?: number) => {
+  handleOrgSelect = (channelId: number, orgId?: number): Record<number, number> => {
     const { channelOrgMapping } = this.state;
     const updatedMapping = { ...channelOrgMapping };
     if (orgId !== undefined) {
@@ -161,6 +161,7 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
       }
     }
     this.setState({ channelOrgMapping: updatedMapping });
+    return updatedMapping;
   };
 
   onChannelSyncConfirm = () => {
@@ -433,6 +434,7 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
             onChannelSelect={this.handleChannelSelect}
             onOrgSelect={this.handleOrgSelect}
             loading={loading}
+            channelOrgMapping={this.state.channelOrgMapping}
           />
           <Dialog
             id="sync-channel-modal"
