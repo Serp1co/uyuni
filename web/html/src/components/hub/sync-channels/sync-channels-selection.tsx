@@ -1,21 +1,15 @@
+// SyncChannelsSelection.tsx
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import debounce from "lodash/debounce";
-import xor from "lodash/xor";
-
-import ChannelsFilters from "manager/content-management/shared/components/panels/sources/channels/channels-filters";
-import {
-  channelsFiltersAvailable,
-  getInitialFiltersState,
-} from "manager/content-management/shared/components/panels/sources/channels/channels-filters-state";
 
 import { BaseChannelType, ChannelTreeType, ChildChannelType } from "core/channels/type/channels.type";
 
-import { VirtualList } from "components/virtual-list";
+import { Form, Select } from "components/input";
+import { SearchField } from "components/table/SearchField";
 
 import { Channel, Org } from "../types";
-import SyncChannelTree from "./sync-channel-tree";
 import SyncChannelProcessor from "./sync-channels-processor";
 
 type Props = {
@@ -24,9 +18,8 @@ type Props = {
   onChannelSelect: (channelId: number, checked: boolean) => void;
   onOrgSelect: (channelId: number, org?: Org) => void;
   loading: boolean;
-  initialSelectedChannelIds?: number[]; // Track already selected channels
-  channelsToAdd?: number[]; // Track pending additions
-  channelsToRemove?: number[]; // Track pending removals
+  channelsToAdd?: number[];
+  channelsToRemove?: number[];
 };
 
 const SyncChannelsSelection = (props: Props) => {
@@ -35,8 +28,8 @@ const SyncChannelsSelection = (props: Props) => {
   const [selectedChannelIds, setSelectedChannelIds] = useState<Set<number>>(new Set());
   const [syncedChannelIds, setSyncedChannelIds] = useState<Set<number>>(new Set());
   const [openRows, setOpenRows] = useState<Set<number>>(new Set());
-  const [activeFilters, setActiveFilters] = useState<string[]>(getInitialFiltersState());
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedArchs, setSelectedArchs] = useState<string[]>([]);
 
   const convertToChannelTree = useCallback((channels: Channel[]): ChannelTreeType[] => {
     const channelMap = new Map<string, Channel>();
@@ -51,105 +44,94 @@ const SyncChannelsSelection = (props: Props) => {
         custom: root.channelOrg !== null,
         archLabel: root.channelArch,
         recommendedChildren: [],
-        isCloned: false, // to add the original label to the channels type
+        isCloned: false,
         standardizedName: root.channelName.toLowerCase(),
         recommended: false,
         subscribable: false,
       };
 
-      const children: ChildChannelType[] = channels
-        .filter((ch) => ch.parentChannelLabel === root.channelLabel)
-        .map((child) => ({
-          id: child.channelId,
-          label: child.channelLabel,
-          name: child.channelName,
-          custom: child.channelOrg !== null,
-          archLabel: child.channelArch,
-          recommendedChildren: [],
-          isCloned: false, // to add the original label to the channels type
-          standardizedName: child.channelName.toLowerCase(),
-          recommended: false,
-          subscribable: false,
-          parent: base,
-        }));
+      const children: ChildChannelType[] = root.children.map((child) => ({
+        id: child.channelId,
+        label: child.channelLabel,
+        name: child.channelName,
+        custom: child.channelOrg !== null,
+        archLabel: child.channelArch,
+        recommendedChildren: [],
+        isCloned: false,
+        standardizedName: child.channelName.toLowerCase(),
+        recommended: false,
+        subscribable: false,
+        parent: base,
+      }));
 
       return { base, children };
     });
   }, []);
 
-  // Apply filters and search - memoized to avoid recalculation
+  const getDistinctArchs = useCallback((channels: Channel[]) => {
+    const archSet = new Set<string>();
+    channels.forEach((channel) => archSet.add(channel.channelArch));
+    return Array.from(archSet).map((arch) => ({ value: arch, label: arch }));
+  }, []);
+
+  // Apply filters and search
   const filteredRows = useMemo(() => {
-    console.log("Calculating filtered rows", {
-      allRows: allRows.length,
-      activeFilters,
-      searchTerm,
-    });
-
     let result = [...allRows];
-
-    // Apply channel type filters
-    if (activeFilters.length > 0) {
-      result = result.filter((row) => {
-        // Check if this channel passes any of the active filters
-        const passesFilter = activeFilters.some((filterId) => {
-          const filterFn = channelsFiltersAvailable[filterId]?.isVisible;
-          if (!filterFn) return false;
-          const passes = filterFn(row.base);
-          return passes;
-        });
-        return passesFilter;
-      });
-    }
-
-    // Apply search
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
+    // Apply architecture filter
+    if (selectedArchs.length > 0) {
       result = result
         .filter((row) => {
-          const baseMatches = row.base.name.toLowerCase().includes(searchLower);
-          const hasMatchingChild = row.children.some((child) => child.name.toLowerCase().includes(searchLower));
+          const baseMatches = selectedArchs.includes(row.base.archLabel || "");
+          const hasMatchingChild = row.children.some((child) => selectedArchs.includes(child.archLabel || ""));
           return baseMatches || hasMatchingChild;
         })
         .map((row) => {
           // If base matches, show all children
-          if (row.base.name.toLowerCase().includes(searchLower)) {
+          if (selectedArchs.includes(row.base.archLabel || "")) {
             return row;
           }
           // Otherwise, filter children
           return {
             ...row,
-            children: row.children.filter((child) => child.name.toLowerCase().includes(searchLower)),
+            children: row.children.filter((child) => selectedArchs.includes(child.archLabel || "")),
+          };
+        });
+    }
+    // Apply text search
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      result = result
+        .filter((row) => {
+          const baseMatches =
+            row.base.name.toLowerCase().includes(searchLower) || row.base.label.toLowerCase().includes(searchLower);
+          const hasMatchingChild = row.children.some(
+            (child) => child.name.toLowerCase().includes(searchLower) || child.label.toLowerCase().includes(searchLower)
+          );
+          return baseMatches || hasMatchingChild;
+        })
+        .map((row) => {
+          // If base matches, show all children
+          if (row.base.name.toLowerCase().includes(searchLower) || row.base.label.toLowerCase().includes(searchLower)) {
+            return row;
+          }
+          // Otherwise, filter children
+          return {
+            ...row,
+            children: row.children.filter(
+              (child) =>
+                child.name.toLowerCase().includes(searchLower) || child.label.toLowerCase().includes(searchLower)
+            ),
           };
         });
     }
 
-    console.log("Filtered result:", result.length, "rows");
     return result;
-  }, [allRows, activeFilters, searchTerm]);
+  }, [allRows, selectedArchs, searchTerm]);
 
-  // Debounced search handler
-  const handleSearch = useMemo(
-    () =>
-      debounce((value: string) => {
-        console.log("Search term changed:", value);
-        setSearchTerm(value);
-
-        // Open all rows when searching
-        if (value && filteredRows.length > 0) {
-          setOpenRows(new Set(filteredRows.map((row) => row.base.id)));
-        }
-      }, 300),
-    [filteredRows]
-  );
-
-  // Initialize data
   useEffect(() => {
-    console.log("Initializing with channels:", props.channels.length);
-
     const channelTree = convertToChannelTree(props.channels);
     channelProcessor.setAvailableOrgs(props.availableOrgs);
 
-    // Initialize sync data and track channels
     const syncedIds = new Set<number>();
     const selectedIds = new Set<number>();
 
@@ -165,7 +147,6 @@ const SyncChannelsSelection = (props: Props) => {
         syncedIds.add(channel.channelId);
       }
 
-      // Initialize selected state based on current sync status and pending changes
       const isCurrentlySynced = channel.synced;
       const isPendingAddition = props.channelsToAdd?.includes(channel.channelId) || false;
       const isPendingRemoval = props.channelsToRemove?.includes(channel.channelId) || false;
@@ -177,134 +158,215 @@ const SyncChannelsSelection = (props: Props) => {
 
     setSyncedChannelIds(syncedIds);
     setSelectedChannelIds(selectedIds);
-    setAllRows(channelTree); // Set unfiltered data
-  }, [
-    props.channels,
-    props.availableOrgs,
-    props.channelsToAdd,
-    props.channelsToRemove,
-    convertToChannelTree,
-    activeFilters,
-  ]);
+    setAllRows(channelTree);
 
-  // Handle filter changes
-  const handleFilterChange = (value: string) => {
-    console.log("Filter toggled:", value);
-    const newActiveFilters = xor(activeFilters, [value]);
-    setActiveFilters(newActiveFilters);
-    // Don't need to do anything else - filteredRows will recalculate automatically
+    // Open all rows initially for better UX
+    setOpenRows(new Set(channelTree.map((row) => row.base.id)));
+  }, [props.channels, props.availableOrgs, props.channelsToAdd, props.channelsToRemove, convertToChannelTree]);
+
+  // debounce after 300ms so that it procs when user most likely has stopped typing
+  const handleSearch = useCallback(
+    debounce((value: string) => {
+      setSearchTerm(value);
+    }, 300),
+    []
+  );
+
+  const handleArchFilterChange = useCallback((_: string | undefined, selectedOptions: string | string[]) => {
+    if (Array.isArray(selectedOptions)) {
+      setSelectedArchs(selectedOptions);
+    } else if (typeof selectedOptions === "string") {
+      setSelectedArchs([selectedOptions]);
+    } else {
+      setSelectedArchs([]);
+    }
+  }, []);
+
+  const filterByChannelName = useCallback((datum: any, criteria: string | undefined) => {
+    if (criteria) {
+      return datum.channelName?.toLowerCase().includes(criteria.toLowerCase()) || false;
+    }
+    return true;
+  }, []);
+
+  // Render a channel row (base or child)
+  const renderChannelRow = (channel: BaseChannelType | ChildChannelType, isChild: boolean = false) => {
+    const channelId = channel.id;
+    const isSelected = selectedChannelIds.has(channelId);
+    const isSynced = syncedChannelIds.has(channelId);
+    const syncData = channelProcessor.getSyncData(channelId);
+
+    const isCurrentlySynced = isSynced;
+    const isPendingAddition = props.channelsToAdd?.includes(channelId) || false;
+    const isPendingRemoval = props.channelsToRemove?.includes(channelId) || false;
+    const isChecked = (isCurrentlySynced && !isPendingRemoval) || (!isCurrentlySynced && isPendingAddition);
+
+    const renderOrg = () => {
+      return !isChecked ? (
+        <span>-</span>
+      ) : (
+        <Form>
+          <Select
+            className="mb-0"
+            name={`org-select-${channelId}`}
+            placeholder={t("Select Organization")}
+            options={props.availableOrgs}
+            getOptionValue={(org: Org) => org.orgId.toString()}
+            getOptionLabel={(org: Org) => org.orgName}
+            defaultValue={syncData?.selectedPeripheralOrg?.orgId.toString()}
+            onChange={(_: string | undefined, orgId: string) => {
+              props.onOrgSelect(
+                channelId,
+                props.availableOrgs.find((org) => org.orgId === Number(orgId))
+              );
+            }}
+            disabled={syncData?.strictOrg}
+          />
+        </Form>
+      );
+    };
+
+    return (
+      <tr
+        key={channelId}
+        className={`${isSynced ? "synced-channel" : ""} ${isChild ? "child-channel-row" : "base-channel-row"}`}
+      >
+        <td className="text-center">
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={(e) => {
+              props.onChannelSelect(channelId, e.target.checked);
+              // Update local state
+              const newSelectedIds = new Set(selectedChannelIds);
+              if (e.target.checked) {
+                newSelectedIds.add(channelId);
+              } else {
+                newSelectedIds.delete(channelId);
+              }
+              setSelectedChannelIds(newSelectedIds);
+            }}
+          />
+        </td>
+        <td>
+          <span style={{ paddingLeft: isChild ? "20px" : "0" }}>
+            {channel.name}
+            {isSynced ? " ✓" : ""}
+          </span>
+        </td>
+        <td>{channel.archLabel}</td>
+        <td>{syncData?.channelOrg === null ? <span>Vendor</span> : renderOrg()}</td>
+      </tr>
+    );
   };
 
-  const Row = useCallback(
-    (channelTree: ChannelTreeType) => {
-      console.log("Rendering row:", channelTree.base.id, channelTree.base.name);
+  // Render a channel tree (base and children)
+  const renderChannelTree = (channelTree: ChannelTreeType) => {
+    const { base, children } = channelTree;
+    const isOpen = openRows.has(base.id);
 
-      return (
-        <SyncChannelTree
-          key={channelTree.base.id}
-          rowDefinition={channelTree}
-          search={searchTerm}
-          openRows={openRows}
-          selectedRows={selectedChannelIds}
-          syncedRows={syncedChannelIds}
-          channelProcessor={channelProcessor}
-          onToggleChannelSelect={(channel, toState) => {
-            const channelId = channel.id;
-            const newState = toState ?? !selectedChannelIds.has(channelId);
-
-            const newSelectedIds = new Set(selectedChannelIds);
-            if (newState) {
-              newSelectedIds.add(channelId);
-            } else {
-              newSelectedIds.delete(channelId);
-            }
-
-            setSelectedChannelIds(newSelectedIds);
-            props.onChannelSelect(channelId, newState);
-          }}
-          onToggleChannelOpen={(channel) => {
-            const newOpenRows = new Set(openRows);
-            if (newOpenRows.has(channel.id)) {
-              newOpenRows.delete(channel.id);
-            } else {
-              newOpenRows.add(channel.id);
-            }
-            setOpenRows(newOpenRows);
-          }}
-          onOrgSelect={props.onOrgSelect}
-        />
-      );
-    },
-    [searchTerm, openRows, selectedChannelIds, syncedChannelIds, channelProcessor, props]
-  );
+    return (
+      <React.Fragment key={base.id}>
+        <tr className="base-channel-row">
+          <td className="text-center">{renderChannelRow(base, false).props.children[0]}</td>
+          <td>
+            <span
+              className="channel-expand-toggle"
+              onClick={() => {
+                const newOpenRows = new Set(openRows);
+                if (isOpen) {
+                  newOpenRows.delete(base.id);
+                } else {
+                  newOpenRows.add(base.id);
+                }
+                setOpenRows(newOpenRows);
+              }}
+              style={{ cursor: "pointer" }}
+            >
+              <i className={`fa ${isOpen ? "fa-angle-down" : "fa-angle-right"}`} /> {base.name}
+              {syncedChannelIds.has(base.id) ? " ✓" : ""}
+            </span>
+          </td>
+          <td>{base.archLabel}</td>
+          <td>{renderChannelRow(base, false).props.children[3]}</td>
+        </tr>
+        {isOpen && children.map((child) => renderChannelRow(child, true))}
+      </React.Fragment>
+    );
+  };
 
   return (
     <div className="sync-channels-wrapper">
+      {/* Filters at the top */}
       <div className="row">
-        <div className="col-lg-3">
-          {/* Search and filters panel */}
-          <div className="panel panel-default">
-            <div className="panel-heading">
-              <h4>{t("Filters")}</h4>
-            </div>
-            <div className="panel-body">
-              <div className="form-group">
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder={t("Search channels...")}
-                  onChange={(e) => handleSearch(e.target.value)}
-                />
-              </div>
-              <hr />
-              <ChannelsFilters activeFilters={activeFilters} onChange={handleFilterChange} />
-            </div>
-          </div>
-
-          {/* Summary panel */}
-          <div className="panel panel-default">
-            <div className="panel-heading">
-              <h4>{t("Summary")}</h4>
-            </div>
-            <div className="panel-body">
-              <p>{t("Total channels: {count}", { count: props.channels.length })}</p>
-              <p>{t("Visible: {count}", { count: filteredRows.length })}</p>
-              <p>{t("Selected: {count}", { count: selectedChannelIds.size })}</p>
-              <p>{t("Currently synced: {count}", { count: syncedChannelIds.size })}</p>
-            </div>
-          </div>
+        <div className="col-md-6">
+          <SearchField
+            placeholder={t("Search channels...")}
+            filter={filterByChannelName}
+            onSearch={(value) => handleSearch(value || "")}
+          />
         </div>
+        <div className="col-md-6">
+          <Form>
+            <Select
+              name="channel-arch-filter"
+              placeholder={t("Filter by architecture")}
+              options={getDistinctArchs(props.channels)}
+              isMulti={true}
+              defaultValue={selectedArchs}
+              onChange={handleArchFilterChange}
+            />
+          </Form>
+        </div>
+      </div>
 
-        <div className="col-lg-9">
-          {/* Channel list */}
+      {/* Summary */}
+      <div className="row mt-2">
+        <div className="col-md-12">
+          <p className="text-muted">
+            {t("Total channels: {total} | Visible: {visible} | Selected: {selected} | Synced: {synced}", {
+              total: props.channels.length,
+              visible: filteredRows.reduce((acc, row) => acc + 1 + row.children.length, 0),
+              selected: selectedChannelIds.size,
+              synced: syncedChannelIds.size,
+            })}
+          </p>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="row mt-3">
+        <div className="col-md-12">
           {props.loading ? (
-            <div className="panel panel-default">
-              <div className="panel-body text-center">
-                <i className="fa fa-spinner fa-spin fa-2x"></i>
-                <p>{t("Loading channels...")}</p>
-              </div>
-            </div>
-          ) : filteredRows.length === 0 ? (
-            <div className="panel panel-default">
-              <div className="panel-body text-center">
-                <p>{t("No channels found.")}</p>
-                {allRows.length > 0 && (
-                  <p className="text-muted">
-                    {t("Try adjusting filters. {count} channels are hidden.", { count: allRows.length })}
-                  </p>
-                )}
-              </div>
+            <div className="text-center">
+              <i className="fa fa-spinner fa-spin fa-2x"></i>
+              <p>{t("Loading channels...")}</p>
             </div>
           ) : (
-            <div className="panel panel-default">
-              <div className="panel-body channel-list-container">
-                <VirtualList
-                  items={filteredRows}
-                  renderItem={Row}
-                  defaultItemHeight={40}
-                  itemKey={(row) => row.base.id}
-                />
-              </div>
+            <div className="table-responsive">
+              <table className="table table-striped">
+                <thead>
+                  <tr>
+                    <th className="text-center" style={{ width: "60px" }}>
+                      {t("Sync")}
+                    </th>
+                    <th>{t("Channel Name")}</th>
+                    <th style={{ width: "150px" }}>{t("Architecture")}</th>
+                    <th style={{ width: "250px" }}>{t("Sync Org")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="text-center">
+                        {t("No channels found matching the current filters.")}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRows.map((channelTree) => renderChannelTree(channelTree))
+                  )}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
