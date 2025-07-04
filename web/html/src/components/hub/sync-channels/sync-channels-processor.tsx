@@ -1,4 +1,3 @@
-// sync-channels-processor.ts
 import ChannelProcessor from "manager/content-management/shared/components/panels/sources/channels/channels-processor";
 
 import { Org } from "../types";

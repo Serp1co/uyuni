@@ -1,4 +1,3 @@
-// SyncChannelTree.tsx
 import * as React from "react";
 
 import styles from "manager/content-management/shared/components/panels/sources/channels/channels-selection.module.scss";

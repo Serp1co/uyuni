@@ -1,4 +1,3 @@
-// SyncOrgsToPeripheralChannel.tsx
 import * as React from "react";
 
 import { Button } from "components/buttons";
@@ -25,7 +24,7 @@ type SyncPeripheralsProps = {
 type State = {
   peripheralId: number;
   peripheralFqdn: string;
-  channels: Channel[]; // Changed from FlatChannel[] to Channel[]
+  channels: Channel[];
   availableOrgs: Org[];
   syncModalOpen: boolean;
   channelsToAdd: number[];
@@ -110,43 +109,60 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
     return allChannels;
   }
 
-  handleChannelSelect = (channelId: number, checked: boolean) => {
-    const { channelsToAdd, channelsToRemove } = this.state;
-    const channel = this.findChannelById(channelId);
-    if (!channel) return;
-    const isChannelSynced = channel.synced;
-    if (checked) {
-      if (isChannelSynced) {
-        if (channelsToRemove.includes(channelId)) {
-          this.setState({
-            channelsToRemove: channelsToRemove.filter((id) => id !== channelId),
-          });
-        }
-      } else {
-        if (!channelsToAdd.includes(channelId)) {
-          this.setState({
-            channelsToAdd: [...channelsToAdd, channelId],
-          });
-        }
+  private isOrgSelectionAllowed(channel: Channel): boolean {
+    return channel.channelOrg !== null;
+  }
+
+  private findChannelByLabel(channelLabel: string): Channel | undefined {
+    const { channels } = this.state;
+    for (const channel of channels) {
+      if (channel.channelLabel === channelLabel) {
+        return channel;
       }
-    } else {
-      if (isChannelSynced) {
-        if (!channelsToRemove.includes(channelId)) {
-          this.setState({
-            channelsToRemove: [...channelsToRemove, channelId],
-          });
-        }
-      } else {
-        if (channelsToAdd.includes(channelId)) {
-          this.setState({
-            channelsToAdd: channelsToAdd.filter((id) => id !== channelId),
-          });
-        }
+      // Check children
+      const childChannel = channel.children.find((child) => child.channelLabel === channelLabel);
+      if (childChannel) {
+        return childChannel;
       }
     }
-  };
+    return undefined;
+  }
+
+  private getAllParentChannels(channel: Channel): Channel[] {
+    const parents: Channel[] = [];
+    let current = channel;
+    while (current.parentChannelLabel) {
+      const parent = this.findChannelByLabel(current.parentChannelLabel);
+      if (parent) {
+        parents.push(parent);
+        current = parent;
+      } else {
+        break;
+      }
+    }
+    return parents;
+  }
+
+  private getAllChildChannels(channel: Channel): Channel[] {
+    const children: Channel[] = [];
+
+    const collectChildren = (ch: Channel) => {
+      ch.children.forEach((child) => {
+        children.push(child);
+        collectChildren(child); // Recursively collect all descendants
+      });
+    };
+
+    collectChildren(channel);
+    return children;
+  }
 
   handleOrgSelect = (channelId: number, org?: Org) => {
+    const channel = this.findChannelById(channelId);
+    if (!channel || !this.isOrgSelectionAllowed(channel)) {
+      return; // Don't allow org selection if not permitted
+    }
+
     this.setState((prevState) => ({
       channels: prevState.channels.map((channel) => {
         // Update root channel
@@ -171,6 +187,75 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
         };
       }),
     }));
+  };
+
+  handleChannelSelect = (channelId: number, checked: boolean) => {
+    const { channelsToAdd, channelsToRemove } = this.state;
+    const channel = this.findChannelById(channelId);
+    if (!channel) return;
+
+    const isChannelSynced = channel.synced;
+    let newChannelsToAdd = [...channelsToAdd];
+    let newChannelsToRemove = [...channelsToRemove];
+
+    // Handle the selected channel first
+    if (checked) {
+      // User is checking the channel (wants to sync it)
+      if (isChannelSynced) {
+        // Already synced, remove from removal list if it was there
+        newChannelsToRemove = newChannelsToRemove.filter((id) => id !== channelId);
+      } else {
+        // Not synced, add to addition list
+        if (!newChannelsToAdd.includes(channelId)) {
+          newChannelsToAdd.push(channelId);
+        }
+      }
+
+      // When selecting a channel, also select all its PARENT channels
+      const parentChannels = this.getAllParentChannels(channel);
+      parentChannels.forEach((parent) => {
+        if (parent.synced) {
+          // Parent is already synced, make sure it's not in removal list
+          newChannelsToRemove = newChannelsToRemove.filter((id) => id !== parent.channelId);
+        } else {
+          // Parent is not synced, add it to addition list
+          if (!newChannelsToAdd.includes(parent.channelId)) {
+            newChannelsToAdd.push(parent.channelId);
+          }
+        }
+      });
+    } else {
+      // User is unchecking the channel (wants to unsync it)
+      if (isChannelSynced) {
+        // Currently synced, add to removal list
+        if (!newChannelsToRemove.includes(channelId)) {
+          newChannelsToRemove.push(channelId);
+        }
+      } else {
+        // Not synced but was in addition list, remove from addition list
+        newChannelsToAdd = newChannelsToAdd.filter((id) => id !== channelId);
+      }
+
+      // When deselecting a channel, also deselect all its CHILD channels
+      const childChannels = this.getAllChildChannels(channel);
+      childChannels.forEach((child) => {
+        if (child.synced) {
+          // Child is synced, add to removal list
+          if (!newChannelsToRemove.includes(child.channelId)) {
+            newChannelsToRemove.push(child.channelId);
+          }
+        } else {
+          // Child is not synced but might be in addition list, remove it
+          newChannelsToAdd = newChannelsToAdd.filter((id) => id !== child.channelId);
+        }
+      });
+    }
+
+    // Update state with all changes
+    this.setState({
+      channelsToAdd: newChannelsToAdd,
+      channelsToRemove: newChannelsToRemove,
+    });
   };
 
   onChannelSyncConfirm = () => {

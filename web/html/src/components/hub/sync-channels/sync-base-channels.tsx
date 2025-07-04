@@ -1,4 +1,3 @@
-// SyncBaseChannel.tsx
 import * as React from "react";
 
 import BaseChannel from "manager/content-management/shared/components/panels/sources/channels/base-channel";
