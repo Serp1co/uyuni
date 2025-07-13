@@ -12,6 +12,7 @@ import { showSuccessToastr, showWarningToastr } from "components/toastr";
 import Network from "utils/network";
 
 import ChannelHierarchicalTable from "./HierarchicalChannelsTable";
+import SyncChannelInfoDialog, { getMandatoryChannelsId, reduceMandatoryIdMapToSet } from "./SyncChannelInfoDialog";
 import { Channel, ChannelSyncProps, FlatChannel, Org } from "./types";
 
 type SyncPeripheralsProps = {
@@ -26,6 +27,8 @@ type State = {
   peripheralFqdn: string;
   channels: FlatChannel[];
   availableOrgs: Org[];
+  infoModalOpen: boolean;
+  selectedChannelForInfo: FlatChannel | null;
   syncModalOpen: boolean;
   channelsToAdd: number[];
   channelsToRemove: number[];
@@ -73,6 +76,9 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
   constructor(props: SyncPeripheralsProps) {
     super(props);
 
+    this.openInfoModal = this.openInfoModal.bind(this);
+    this.closeInfoModal = this.closeInfoModal.bind(this);
+
     props.channels.forEach((channel) => {
       if (!channel) return;
       if (channel.selectedPeripheralOrg !== null) {
@@ -85,6 +91,8 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
       peripheralFqdn: props.peripheralFqdn,
       channels: flattenChannels(props.channels),
       availableOrgs: props.availableOrgs,
+      selectedChannelForInfo: null,
+      infoModalOpen: false,
       syncModalOpen: false,
       channelsToAdd: [],
       channelsToRemove: [],
@@ -110,50 +118,88 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
     this.tableRef.current?.refresh();
   }
 
-  private openCloseModalState(isOpen: boolean) {
+  private openInfoModal(channel: FlatChannel) {
+    this.setState({
+      selectedChannelForInfo: channel,
+      infoModalOpen: true,
+    });
+  }
+
+  private closeInfoModal() {
+    this.setState({ selectedChannelForInfo: null, infoModalOpen: false });
+  }
+
+  private openCloseSyncModalState(isOpen: boolean) {
     this.setState({ syncModalOpen: isOpen });
   }
 
-  handleChannelSelect = (channelId: number, checked: boolean) => {
+  private isChannelSyncedCheck = (channelId: number) => {
     const { channelsToAdd, channelsToRemove, channels } = this.state;
-    // Check if the channel is already synced (has synced flag true)
     const isChannelSynced = channels.some((channel) => channel.channelId === channelId && channel.synced);
-    if (checked) {
-      // User is checking the channel (wants to sync it)
-      if (isChannelSynced) {
-        // If it's already synced but was in channelsToRemove (user changed their mind),
-        // remove it from channelsToRemove
-        if (channelsToRemove.includes(channelId)) {
-          this.setState({
-            channelsToRemove: channelsToRemove.filter((id) => id !== channelId),
-          });
-        }
-      } else {
-        // If it's not synced yet, add it to channelsToAdd (unless it's already there)
-        if (!channelsToAdd.includes(channelId)) {
-          this.setState({
-            channelsToAdd: [...channelsToAdd, channelId],
-          });
-        }
+    // User is checking the channel (wants to sync it)
+    if (isChannelSynced) {
+      // If it's already synced but was in channelsToRemove (user changed their mind),
+      // remove it from channelsToRemove
+      if (channelsToRemove.includes(channelId)) {
+        this.setState({
+          channelsToRemove: channelsToRemove.filter((id) => id !== channelId),
+        });
       }
     } else {
-      // User is unchecking the channel (wants to unsync it)
-      if (isChannelSynced) {
-        // If it's currently synced, add it to channelsToRemove (unless it's already there)
-        if (!channelsToRemove.includes(channelId)) {
-          this.setState({
-            channelsToRemove: [...channelsToRemove, channelId],
-          });
-        }
-      } else {
-        // If it's not synced but was in channelsToAdd (user changed their mind),
-        // remove it from channelsToAdd
-        if (channelsToAdd.includes(channelId)) {
-          this.setState({
-            channelsToAdd: channelsToAdd.filter((id) => id !== channelId),
-          });
-        }
+      // If it's not synced yet, add it to channelsToAdd (unless it's already there)
+      if (!channelsToAdd.includes(channelId)) {
+        this.setState({
+          channelsToAdd: [...channelsToAdd, channelId],
+        });
       }
+    }
+  };
+
+  private isChannelNotSyncedCheck = (channelId: number) => {
+    const { channelsToAdd, channelsToRemove, channels } = this.state;
+    const isChannelSynced = channels.some((channel) => channel.channelId === channelId && channel.synced);
+    // User is unchecking the channel (wants to unsync it)
+    if (isChannelSynced) {
+      // If it's currently synced, add it to channelsToRemove (unless it's already there)
+      if (!channelsToRemove.includes(channelId)) {
+        this.setState({
+          channelsToRemove: [...channelsToRemove, channelId],
+        });
+      }
+    } else {
+      // If it's not synced but was in channelsToAdd (user changed their mind),
+      // remove it from channelsToAdd
+      if (channelsToAdd.includes(channelId)) {
+        this.setState({
+          channelsToAdd: channelsToAdd.filter((id) => id !== channelId),
+        });
+      }
+    }
+  };
+
+  private checkChannelSelect = (channelId: number, checked: boolean) => {
+    if (checked) {
+      this.isChannelSyncedCheck(channelId);
+    } else {
+      this.isChannelNotSyncedCheck(channelId);
+    }
+  };
+
+  handleChannelSelect = (channelId: number, checked: boolean) => {
+    // Set loading as we are selecting in async
+    const { channels } = this.state;
+    if (checked) {
+      getMandatoryChannelsId([channelId]).then((data: Record<number, Array<number>>) => {
+        let idsSet: Set<number> = reduceMandatoryIdMapToSet(data);
+        idsSet.forEach((id) => this.checkChannelSelect(id, checked));
+      });
+    } else {
+      // deselect selected
+      this.checkChannelSelect(channelId, checked);
+      // and deselect all the child channels
+      let channel = channels.find((item) => item.channelId === channelId);
+      let children = channels.filter((item) => item.parentChannelLabel === channel?.channelLabel);
+      children.forEach((child) => this.checkChannelSelect(child.channelId, checked));
     }
   };
 
@@ -163,7 +209,6 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
         if (channel.channelId !== channelId) {
           return channel;
         }
-
         return {
           ...channel,
           selectedPeripheralOrg: org ?? null,
@@ -240,12 +285,12 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
           channels: channelSync.channels,
         };
         this.setStateFromApiProps(newProps);
-        this.openCloseModalState(false);
+        this.openCloseSyncModalState(false);
       })
       .catch((error) => {
         Network.showResponseErrorToastr(error);
         this.setState({ loading: false });
-        this.openCloseModalState(false);
+        this.openCloseSyncModalState(false);
       });
   };
 
@@ -253,18 +298,27 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
     const { channelsToAdd, channelsToRemove } = this.state;
     // Only open the modal if there are changes to apply
     if (channelsToAdd.length > 0 || channelsToRemove.length > 0) {
-      this.openCloseModalState(true);
+      this.openCloseSyncModalState(true);
     } else {
       showWarningToastr(t("Please select at least one channel to add or remove from sync"));
     }
   };
 
   onChannelSyncModalClose = () => {
-    this.openCloseModalState(false);
+    this.openCloseSyncModalState(false);
   };
 
   render() {
-    const { channels, syncModalOpen, availableOrgs, loading, channelsToAdd, channelsToRemove } = this.state;
+    const {
+      channels,
+      selectedChannelForInfo,
+      infoModalOpen,
+      syncModalOpen,
+      availableOrgs,
+      loading,
+      channelsToAdd,
+      channelsToRemove,
+    } = this.state;
 
     const channelsToAddData = channels.filter((channel) => channelsToAdd.includes(channel.channelId));
     const channelsToRemoveData = channels.filter((channel) => channelsToRemove.includes(channel.channelId));
@@ -287,10 +341,9 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
       if (channel.channelOrg === null) {
         return <span>Vendor</span>;
       }
-      if (channel.selectedPeripheralOrg !== undefined || channel.selectedPeripheralOrg !== null) {
+      if (channel.selectedPeripheralOrg !== null) {
         return <span>{channel.selectedPeripheralOrg ? channel.selectedPeripheralOrg.orgName : "Unknown"}</span>;
       } else {
-        // If no org is explicitly selected for syncing, show "Not set"
         return <span className="text-warning">Not set</span>;
       }
     };
@@ -354,7 +407,7 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
       </>
     );
 
-    const modalContent = (
+    const syncModalContent = (
       <>
         <h3 className="mt-4">{t("Channel Sync Changes")}</h3>
         <p>{t("You are about to make the following changes:")}</p>
@@ -363,7 +416,7 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
       </>
     );
 
-    const modalFooter = (
+    const syncModalFooter = (
       <div className="col-lg-12">
         <div className="pull-right btn-group">
           <Button
@@ -435,6 +488,7 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
           <ChannelHierarchicalTable
             channels={markedChannels}
             availableOrgs={availableOrgs}
+            onInfoRequest={this.openInfoModal}
             onChannelSelect={this.handleChannelSelect}
             onOrgSelect={this.handleOrgSelect}
             loading={loading}
@@ -442,10 +496,15 @@ export class SyncOrgsToPeripheralChannel extends React.Component<SyncPeripherals
           <Dialog
             id="sync-channel-modal"
             title={t("Confirm Channel Synchronization Changes")}
-            content={modalContent}
+            content={syncModalContent}
             isOpen={syncModalOpen}
-            footer={modalFooter}
+            footer={syncModalFooter}
             onClose={this.onChannelSyncModalClose}
+          />
+          <SyncChannelInfoDialog
+            channel={selectedChannelForInfo}
+            isOpen={infoModalOpen}
+            onClose={() => this.closeInfoModal()}
           />
         </div>
       </TopPanel>

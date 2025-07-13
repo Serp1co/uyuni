@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useCallback, useMemo, useState } from "react";
 
+import { Button } from "components/buttons";
 import { Form, Select } from "components/input";
 import { Column } from "components/table/Column";
 import { HierarchicalRow, HierarchicalTable } from "components/table/HierarchicalTable";
@@ -17,6 +18,7 @@ type ChannelWithHierarchy = FlatChannel &
 
 type ChannelTableProps = {
   channels: FlatChannel[];
+  onInfoRequest: (channel: FlatChannel) => any;
   onChannelSelect: (channelId: number, checked: boolean) => void;
   onOrgSelect?: (channelId: number, org?: Org) => void;
   loading?: boolean;
@@ -25,9 +27,11 @@ type ChannelTableProps = {
 
 const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
   channels,
+  onInfoRequest,
   onChannelSelect,
   availableOrgs,
   onOrgSelect,
+  loading,
 }) => {
   const [selectedArchs, setSelectedArchs] = useState<string[]>([]);
 
@@ -55,11 +59,7 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
   const filteredData = useMemo(() => {
     return hierarchicalData.filter((channel) => {
       // Apply architecture filter
-      if (selectedArchs.length > 0 && !selectedArchs.includes(channel.channelArch)) {
-        return false;
-      }
-
-      return true;
+      return !(selectedArchs.length > 0 && !selectedArchs.includes(channel.channelArch));
     });
   }, [hierarchicalData, selectedArchs]);
 
@@ -70,25 +70,20 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
   const handleArchFilterChange = useCallback((_: string | undefined, selectedOptions: string | string[]) => {
     if (Array.isArray(selectedOptions)) {
       setSelectedArchs(selectedOptions);
-    } else if (typeof selectedOptions === "string") {
-      setSelectedArchs([selectedOptions]);
     } else {
-      setSelectedArchs([]);
+      setSelectedArchs([selectedOptions]);
     }
   }, []);
 
   const rowClass = useCallback((row: ChannelWithHierarchy) => {
     const isCurrentlySynced = row.synced;
-    let className = isCurrentlySynced ? "synced-channel" : "";
-    return className;
+    return isCurrentlySynced ? "synced-channel" : "";
   }, []);
 
   const renderSyncCell = useCallback(
     (row: ChannelWithHierarchy) => {
       const channelId = row.channelId;
-      // Directly use the pre-calculated checkbox state
       const isChecked = row.isChecked;
-
       return (
         <div className="text-center">
           <input
@@ -99,7 +94,6 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
               if (row.channelOrg !== null && !row.strictOrg) {
                 onOrgSelect?.(channelId, !isChecked ? availableOrgs[0] : undefined);
               }
-
               onChannelSelect(channelId, !isChecked);
             }}
           />
@@ -109,9 +103,27 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
     [onChannelSelect]
   );
 
-  const renderChannelNameCell = useCallback((row: ChannelWithHierarchy) => {
-    return row.channelName;
-  }, []);
+  const renderChannelInfoBtn = useCallback(
+    (row: ChannelWithHierarchy) => {
+      return (
+        <Button className="is-plain" title={t("Channel Information")} handler={() => onInfoRequest(row)}>
+          <i className="fa fa-question"></i>
+        </Button>
+      );
+    },
+    [onInfoRequest]
+  );
+
+  const renderChannelNameCell = useCallback(
+    (row: ChannelWithHierarchy) => {
+      return (
+        <span>
+          {row.channelName} {renderChannelInfoBtn(row)}
+        </span>
+      );
+    },
+    [renderChannelInfoBtn]
+  );
 
   const renderArchCell = useCallback((row: ChannelWithHierarchy) => {
     return row.channelArch;
@@ -123,12 +135,10 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
         // Vendor channels can't sync orgs
         return <span>Vendor</span>;
       }
-
       if (row.strictOrg && row.selectedPeripheralOrg !== null) {
         // Only 1 option, no choice
         return <span>{row.selectedPeripheralOrg.orgName}</span>;
       }
-
       if (!row.isChecked) {
         // The row is not selected, do not show anything
         return <span>{"-"}</span>;
@@ -185,7 +195,6 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
     if (criteria) {
       return datum.channelName.includes(criteria);
     }
-
     return true;
   }, []);
 
@@ -204,6 +213,7 @@ const HierarchicalChannelsTable: React.FC<ChannelTableProps> = ({
       cssClassFunction={rowClass}
       searchField={searchField}
       additionalFilters={[archFilter]}
+      loading={loading}
     >
       <Column headerClass="text-center" columnKey="synced" header={t("Sync")} cell={renderSyncCell} width="60px" />
       <Column columnClass="col" columnKey="channelName" header={t("Channel Name")} cell={renderChannelNameCell} />

@@ -60,6 +60,10 @@ type HierarchicalTableProps = {
 
   /** Children node in the table (Column components) */
   children: React.ReactNode;
+
+  /** Indicate whether the data is loading (only effective for tables using SimpleDataProvider) */
+  loading?: boolean;
+
 };
 
 export const HierarchicalTable = React.forwardRef<TableRef, HierarchicalTableProps>((props, ref) => {
