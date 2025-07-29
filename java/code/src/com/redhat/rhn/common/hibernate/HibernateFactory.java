@@ -19,6 +19,7 @@ import com.redhat.rhn.common.db.datasource.CallableMode;
 import com.redhat.rhn.common.db.datasource.DataResult;
 import com.redhat.rhn.common.db.datasource.ModeFactory;
 import com.redhat.rhn.common.db.datasource.SelectMode;
+import com.redhat.rhn.frontend.listview.PageControl;
 
 import org.apache.commons.collections.ListUtils;
 import org.apache.commons.io.IOUtils;
@@ -55,6 +56,8 @@ import java.util.stream.IntStream;
 import javax.persistence.FlushModeType;
 import javax.persistence.criteria.CriteriaBuilder;
 import javax.persistence.criteria.CriteriaDelete;
+import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Path;
 import javax.persistence.criteria.Root;
 
 /**
@@ -830,6 +833,59 @@ public abstract class HibernateFactory {
     @SuppressWarnings("unchecked")
     public static <T> T unproxy(T proxy) {
         return (T) Hibernate.unproxy(proxy);
+    }
+
+    /**
+     * Helper query to build a count query from page control
+     * @param entityClass the entity to count
+     * @param pc the page control object
+     * @return the count query for entity
+     * @param <E> the type of entity
+     */
+    public static <E> Query<Long> buildCountQueryFromPageControl(Class<E> entityClass, PageControl pc) {
+        Session session = getSession();
+
+        CriteriaBuilder builder = session.getCriteriaBuilder();
+        CriteriaQuery<Long> criteria = builder.createQuery(Long.class);
+
+        Root<E> root = criteria.from(entityClass);
+
+        criteria.select(builder.count(root));
+
+        if (pc.hasFilter()) {
+            criteria.where(builder.like(root.get(pc.getFilterColumn()), "%" + pc.getFilterData() + "%"));
+        }
+
+        return session.createQuery(criteria);
+    }
+
+    /**
+     * Helper query to build a list query from page control
+     * @param entityClass the entity to list
+     * @param pc the page control
+     * @return the list query for entity
+     * @param <E> the type of entity
+     */
+    public static <E> Query<E> buildListQueryFromPageControl(Class<E> entityClass, PageControl pc) {
+        Session session = getSession();
+
+        CriteriaBuilder builder = session.getCriteriaBuilder();
+        CriteriaQuery<E> criteria = builder.createQuery(entityClass);
+
+        Root<E> root = criteria.from(entityClass);
+
+        criteria.select(root);
+
+        if (pc.hasFilter()) {
+            criteria.where(builder.like(root.get(pc.getFilterColumn()), "%" + pc.getFilterData() + "%"));
+        }
+
+        Path<Object> sortColumn = root.get(pc.getSortColumn());
+        criteria.orderBy(pc.isSortDescending() ? builder.desc(sortColumn) : builder.asc(sortColumn));
+
+        return session.createQuery(criteria)
+                .setFirstResult(pc.getStart() - 1)
+                .setMaxResults(pc.getPageSize());
     }
 
 }

@@ -31,6 +31,7 @@ import com.redhat.rhn.domain.rhnpackage.Package;
 import com.redhat.rhn.domain.scc.SCCRepository;
 import com.redhat.rhn.domain.server.Server;
 import com.redhat.rhn.domain.user.User;
+import com.redhat.rhn.frontend.listview.PageControl;
 import com.redhat.rhn.manager.appstreams.AppStreamsManager;
 import com.redhat.rhn.manager.channel.ChannelManager;
 import com.redhat.rhn.manager.content.ContentSyncManager;
@@ -1172,9 +1173,20 @@ public class ChannelFactory extends HibernateFactory {
      * @return list of base channels
      */
     public static List<Channel> listAllBaseChannels() {
-        return singleton.listObjectsByNamedQuery("Channel.findAllBaseChannelsOnSatellite", Map.of());
+        return listPaginatedBaseChannels(null);
     }
 
+    /**
+     * Return the paginated list of base channels if PageControl is not null or the full list
+     * @param pc the page control
+     * @return a list of channels
+     */
+    public static List<Channel> listPaginatedBaseChannels(PageControl pc) {
+        if (pc == null) {
+            return singleton.listObjectsByNamedQuery("Channel.findAllBaseChannelsOnSatellite", Map.of());
+        }
+        return buildListQueryFromPageControl(Channel.class, pc).list();
+    }
 
     /**
      * List all child channels of the given parent regardless of the user
@@ -1342,6 +1354,7 @@ public class ChannelFactory extends HibernateFactory {
     public static List<Channel> listAllChannels() {
         return getSession().createQuery("FROM Channel c", Channel.class).getResultList();
     }
+
 
     /**
      * List all vendor channels (org is null)
@@ -1937,4 +1950,5 @@ public class ChannelFactory extends HibernateFactory {
         }
         return channel;
     }
+
 }

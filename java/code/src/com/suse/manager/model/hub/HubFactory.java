@@ -462,42 +462,4 @@ public class HubFactory extends HibernateFactory {
         return Optional.empty();
     }
 
-    private static <E> Query<Long> buildCountQueryFromPageControl(Class<E> entityClass, PageControl pc) {
-        Session session = getSession();
-
-        CriteriaBuilder builder = session.getCriteriaBuilder();
-        CriteriaQuery<Long> criteria = builder.createQuery(Long.class);
-
-        Root<E> root = criteria.from(entityClass);
-
-        criteria.select(builder.count(root));
-
-        if (pc.hasFilter()) {
-            criteria.where(builder.like(root.get(pc.getFilterColumn()), "%" + pc.getFilterData() + "%"));
-        }
-
-        return session.createQuery(criteria);
-    }
-
-    private static <E> Query<E> buildListQueryFromPageControl(Class<E> entityClass, PageControl pc) {
-        Session session = getSession();
-
-        CriteriaBuilder builder = session.getCriteriaBuilder();
-        CriteriaQuery<E> criteria = builder.createQuery(entityClass);
-
-        Root<E> root = criteria.from(entityClass);
-
-        criteria.select(root);
-
-        if (pc.hasFilter()) {
-            criteria.where(builder.like(root.get(pc.getFilterColumn()), "%" + pc.getFilterData() + "%"));
-        }
-
-        Path<Object> sortColumn = root.get(pc.getSortColumn());
-        criteria.orderBy(pc.isSortDescending() ? builder.desc(sortColumn) : builder.asc(sortColumn));
-
-        return session.createQuery(criteria)
-            .setFirstResult(pc.getStart() - 1)
-            .setMaxResults(pc.getPageSize());
-    }
 }
